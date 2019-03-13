@@ -22,7 +22,6 @@ def random_policy(n):
 for step in range(1000):
     action = random_policy(env.action_space.n)
     obs, reward, done, info = env.step(action)  # Steps the env by one timestep
-    print(info)
     env.render()  # Renders one frame of the environment
     time.sleep(0.1)  # Waits 1/10 second
     if done:
