@@ -5,6 +5,10 @@ import math
 
 from PIL import Image
 
+# state:action
+policy = {'right': 2,
+          'left': 3,
+          'none': 0}
 
 def random_policy(n):
     action = np.random.randint(0, n)
@@ -45,6 +49,10 @@ def dist_to_tile(obs):
     if pixel_at_xy.count(0) == 3:
         side = 'right'
 
+    # If minor tile is above the major tile, then side is none
+    if dx == 16:
+        side = 'none'
+
     # Returns the side of the minor tile and its distance in the (0, 1) interval
     return side, dist/max_dist
 
@@ -70,10 +78,12 @@ def main():
         # get started
         env.step(1)
         side, dist = dist_to_tile(obs)
-        print(side, dist)
+        #print(side, dist)
         action = 3
         if side == 'right':
             action = 2
+        elif side == 'none':
+            action = 0
         obs, reward, done, info = env.step(action)  # Steps the env by one timestep
         env.render()  # Renders one frame of the environment
         time.sleep(1)  # Waits 1/10 second
