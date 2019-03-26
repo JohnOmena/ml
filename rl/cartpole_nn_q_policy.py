@@ -1,157 +1,87 @@
-import tensorflow as tf
-import numpy as np
 import gym
-import matplotlib.pyplot as plt
-from sklearn.pipeline import FeatureUnion
-from sklearn.preprocessing import StandardScaler
-from sklearn.kernel_approximation import RBFSampler
+import numpy as np
+import time
+import tensorflow as tf
+from scipy.misc import imresize
+from random import randint
+import scipy.misc
 
+# Action space is Discrete
+# Observation space is of type Box
 
-class FeatureTransformer:
+# These terms above refer to the allowed rules
+#   - Discrete space allows a fixed range of non-negative numbers
+#       - In our case, (0, 1, 2, 3)
+#   - Box space represents a n-dimensional box
+#       - In our case, any valid observation would be an array of 210 x 160 x 3 (obs.shape)
 
-    def __init__(self, env):
-        obs_examples = np.random.random((20000, 4))
-        print(obs_examples.shape)
-        scaler = StandardScaler()
-        scaler.fit(obs_examples)
+env_name = 'CartPole-v0'
+env = gym.make(env_name)
+obs = env.reset()  # Resets the environment and returns the observation 
 
-        # Used to convert a state to a featurized representation.
-        # We use RBF kernels with different variances to cover different parts of the space
-        featurizer = FeatureUnion([
-            ("cart_position", RBFSampler(gamma=0.02, n_components=500)),
-            ("cart_velocity", RBFSampler(gamma=1.0, n_components=500)),
-            ("pole_angle", RBFSampler(gamma=0.5, n_components=500)),
-            ("pole_velocity", RBFSampler(gamma=0.1, n_components=500))
-            ])
+i, j = 2, 6
+q = [[0 for x in range(i)] for y in range(j)]
 
-        feature_examples = featurizer.fit_transform(scaler.transform(obs_examples))
-        print(feature_examples.shape)
+alpha = 0.1
+gamma = 0.9
 
-        self.dimensions = feature_examples.shape[1]
-        self.scaler = scaler
-        self.featurizer = featurizer
+actual_state = 0
 
-    def transform(self, observations):
-        scaled = self.scaler.transform(observations)
-        return self.featurizer.transform(scaled)
+IM_SIZE_1 = 142
+IM_SIZE_2 = 166
 
+def action():
+    arr = q[actual_state]
+    if(arr[0] == 0 and arr[1] == 0):
+        _max = np.random.randint(1)
+    if(arr[0] > arr[1]):
+        _max = 1
+    else:
+        _max = 0
+    #print("Estado: {} Action: {}" . format(actual_state, _max))
+    return _max
 
-class NeuralNetwork:
-    
-    def __init__(self, D):
-        eta = 0.1
-        self.W = tf.Variable(tf.random_normal(shape=(D, 1)), name='w')
-        self.X = tf.placeholder(tf.float32, shape=(None, D), name='X')
-        self.Y = tf.placeholder(tf.float32, shape=(None,), name='Y')
+def calculate_next(obs):
+    pos, _, angle, _ = obs
+    _sum = 0
+    _sum += int((pos - (-2.4))/2.4)
+    _sum += int(((angle - (-41.8))/41.8)*4)
+    return _sum
 
-        # make prediction and cost
-        Y_hat = tf.reshape(tf.matmul(self.X, self.W), [-1])
-        err = self.Y - Y_hat
-        cost = tf.reduce_sum(tf.pow(err, 2))
+max_reward = 0
+max_episode = 0
+max_step = 0
 
-        # ops we want to call later
-        self.train_op = tf.train.GradientDescentOptimizer(eta).minimize(cost)
-        self.predict_op = Y_hat
-
-        # start the session and initialize params
-        init = tf.global_variables_initializer()
-        self.session = tf.Session()
-        self.session.run(init)
-
-    def train(self, X, Y):
-        self.session.run(self.train_op, feed_dict={self.X: X, self.Y: Y})
-
-    def predict(self, X):
-        return self.session.run(self.predict_op, feed_dict={self.X: X})
-
-
-class Agent:
-
-    def __init__(self, env, feature_transformer):
-        self.env = env
-        self.agent = []
-        self.feature_transformer = feature_transformer
-        for i in range(env.action_space.n):
-            model = NeuralNetwork(feature_transformer.dimensions)
-            self.agent.append(model)
-
-    def predict(self, s):
-        X = self.feature_transformer.transform([s])
-        return np.array([m.predict(X)[0] for m in self.agent])
-
-    def update(self, s, a, G):
-        X = self.feature_transformer.transform([s])
-        self.agent[a].train(X, [G])
-
-    def sample_action(self, s, eps):
-        if np.random.random() < eps:
-            return self.env.action_space.sample()
-        else:
-            return np.argmax(self.predict(s))
-
-
-def play_one(env, model, eps, gamma):
+for i_episode in range(1000000):
     obs = env.reset()
-    done = False
-    totalreward = 0
-    iters = 0
-    while not done and iters < 2000:
-        action = model.sample_action(obs, eps)
-        prev_obs = obs
-        obs, reward, done, info = env.step(action)
-        env.render()
+    total_reward = 0
+    avg_reward = 0
+    for step in range(1000):
+        act = action()
+        state = actual_state
+        
+        obs, reward, done, info = env.step(act)  
+    
+        next_state = calculate_next(obs)
+
+        actual_state = next_state
+        next_action = action()
+
+        q[state][act] = q[state][act] + (alpha * (reward + gamma*q[next_state][next_action] - q[state][act]))
+
+        total_reward += reward
+        avg_reward = total_reward/(step + 1)
+
+        if(total_reward > max_reward):
+            max_reward = total_reward
+            max_episode = i_episode
+            max_step = step
+
+        env.render() 
 
         if done:
-            reward = -400
+            print("Episode is over in {} steps. Max reward: {} in {} episode with {} steps " . format(step, max_reward, max_episode, max_step))
+            break
 
-        # update model
-        next = model.predict(obs)
-        assert(len(next.shape) == 1)
-        G = reward + gamma * np.max(next)
-        model.update(prev_obs, action, G)
-
-        if reward == 1:
-            totalreward += reward
-        
-        iters += 1
-
-    return totalreward
-
-
-if __name__ == '__main__':
-    env_name = 'CartPole-v0'
-    env = gym.make(env_name)
-    ft = FeatureTransformer(env)
-    agent = Agent(env, ft)
-    gamma = 0.97
-
-    N = 10000
-    totalrewards = np.empty(N)
-    running_avg = np.empty(N)
-
-    for n in range(N):
-        eps = 1.0 / np.sqrt(n + 1)
-        totalreward = play_one(env, agent, eps, gamma)
-        totalrewards[n] = totalreward
-        running_avg[n] = totalrewards[max(0, n - 100):(n + 1)].mean()
-        if n % 100 == 0:
-            print("episode: {0}, total reward: {1}, eps: {2}, avg reward (last 100): {3}".format(
-                n, totalreward, eps, running_avg[n]),
-                )
-
-    print("avg reward for last 100 episodes: ", totalrewards[-100:].mean())
-    print("total steps: ", totalrewards.sum())
-
-    plt.plot(totalrewards)
-    plt.xlabel('episodes')
-    plt.ylabel('Total Rewards')
-    plt.show()
-
-    plt.plot(running_avg)
-
-    plt.xlabel('episodes')
-    plt.ylabel('Running Average')
-    plt.show()
-
-    env.close()
+env.close()
 
